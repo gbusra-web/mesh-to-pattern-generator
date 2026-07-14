@@ -1,0 +1,9 @@
+trimesh
+scipy
+scikit-learn
+shapely
+matplotlib
+streamlit
+plotly
+pandas
+numpy
