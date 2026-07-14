@@ -7,3 +7,4 @@ streamlit
 plotly
 pandas
 numpy
+networkx
