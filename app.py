@@ -195,13 +195,13 @@ def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
 # ARAYÜZ
 # ---------------------------------------------------------------------------
 
-st.title("🐝 STL → Terzi Kalıbı Çıkarıcı")
+st.title("🐝 3D → Terzi Kalıbı Çıkarıcı")
 
 with st.sidebar:
     st.header("1. Model")
     yuklenen_dosya = st.file_uploader("STL / OBJ / PLY yükle", type=["stl", "obj", "ply"])
     birim = st.selectbox("Alan birimi", list(BIRIM_CARPANLARI.keys()))
-    st.caption("STL dosyanız mm cinsindense 'mm' seçin; farklıysa çıktıyı buna göre okuyun.")
+    st.caption("dosyanızı mm cinsindense 'mm' seçin; farklıysa çıktıyı buna göre okuyun.")
     
     st.header("2. Ölçek Ayarı")
     olcek_carpani = st.number_input(
@@ -214,7 +214,7 @@ with st.sidebar:
 
 
 if yuklenen_dosya is None:
-    st.info("Devam etmek için sol menüden bir STL dosyası yükleyin.")
+    st.info("Devam etmek için sol menüden bir STL / OBJ / PLY dosyası yükleyin.")
     st.stop()
 
 # Orijinal modeli önbellekten yükle
