@@ -26,9 +26,10 @@ from kalip import (
     parcalari_uret,
     toplam_distorsiyon_skoru,
     optimal_parca_sayisi_bul,
+    dikis_merkezleri_bul,
 )
 
-st.set_page_config(page_title="Terzi Kalıbı Çıkarıcı", layout="wide")
+st.set_page_config(page_title="Terzi Kalıbı Çıkarıcı", page_icon="🐝", layout="wide")
 
 BIRIM_CARPANLARI = {
     "mm (varsayılan)": 1.0,
