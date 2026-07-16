@@ -91,7 +91,8 @@ def uc_boyutlu_gorseli_ciz(mesh, kume_etiketleri, aktif_kumeler):
     return fig
 
 
-def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
+# DÜZELTİLMİŞ HALİ
+def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi, dikis_merkezleri=None):
     """Her parça için ayrı ayrı matplotlib figürü üretir (PNG bytes olarak)."""
     import io
     import matplotlib.pyplot as plt
@@ -307,6 +308,7 @@ with sekme2:
     for i, (ad, veri) in enumerate(goruntuler.items()):
         with kolonlar[i % 3]:
             st.image(veri, caption=ad, use_container_width=True)
+
 
     # --- indirme: zip + csv ---
     zip_buf = io.BytesIO()
