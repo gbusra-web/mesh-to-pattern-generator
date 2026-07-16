@@ -137,16 +137,16 @@ def segment_renkleri_uret(kume_etiketleri, aktif_kumeler, seed=42):
 def segmenti_duzlestir(submesh, tolerans_orani=0.015, simplify_orani=0.3):
     """
     Bir alt-mesh'i (submesh) en iyi düzleme izdüşürüp pürüzsüz bir 2D
-    poligon (shapely Polygon) olarak döndürür.
+    poligon (shapely Polygon) ve dönüşüm matrisi olarak döndürür.
     """
     sinir_hatlari = submesh.outline()
     if not sinir_hatlari or len(sinir_hatlari.entities) == 0:
-        return None
+        return None, None
 
     merkez = submesh.centroid
     ortalama_normal = submesh.face_normals.mean(axis=0)
     if np.linalg.norm(ortalama_normal) == 0:
-        return None
+        return None, None
     ortalama_normal /= np.linalg.norm(ortalama_normal)
 
     donusum_matrisi = trimesh.geometry.plane_transform(merkez, ortalama_normal)
@@ -159,13 +159,13 @@ def segmenti_duzlestir(submesh, tolerans_orani=0.015, simplify_orani=0.3):
             en_uzun_yol = noktalar_2d
 
     if len(en_uzun_yol) < 3:
-        return None
+        return None, None
 
     ana_poligon = Polygon(en_uzun_yol)
     if not ana_poligon.is_valid:
         ana_poligon = ana_poligon.buffer(0)
     if ana_poligon.is_empty:
-        return None
+        return None, None
 
     boyut_olcegi = submesh.scale
     tolerans = boyut_olcegi * tolerans_orani
@@ -173,19 +173,13 @@ def segmenti_duzlestir(submesh, tolerans_orani=0.015, simplify_orani=0.3):
     final_poligon = yumusatilmis.simplify(tolerans * simplify_orani, preserve_topology=True)
 
     if final_poligon.is_empty or not hasattr(final_poligon, "exterior") or final_poligon.exterior is None:
-        return None
+        return None, None
 
-    return final_poligon
+    return final_poligon, donusum_matrisi
 
-
-# ---------------------------------------------------------------------------
-# 4) TÜM PARÇALARI ÜRETME + ALAN / DİSTORSİYON HESABI
-# ---------------------------------------------------------------------------
 
 def parcalari_uret(mesh, kume_etiketleri, aktif_kumeler):
-    """
-    Her aktif küme için 2D kalıp, alan ve distorsiyon hesabı yapar.
-    """
+    """Her aktif küme için 2D kalıp, alan, distorsiyon ve uzay dönüşüm matrisi üretir."""
     sonuclar = []
     for k_id in aktif_kumeler:
         yuzey_idx = np.where(kume_etiketleri == k_id)[0]
@@ -194,29 +188,28 @@ def parcalari_uret(mesh, kume_etiketleri, aktif_kumeler):
         submesh = mesh.submesh([yuzey_idx], append=True)
         gercek_3d_alan = submesh.area
 
-        poligon = segmenti_duzlestir(submesh)
-        if poligon is None:
+        sonuc = segmenti_duzlestir(submesh)
+        if sonuc is None or sonuc[0] is None:
             continue
-
+            
+        poligon, don_mat = sonuc
         kalip_2d_alan = poligon.area
+        
         distorsiyon = (
             abs(kalip_2d_alan - gercek_3d_alan) / gercek_3d_alan
-            if gercek_3d_alan > 0
-            else np.nan
+            if gercek_3d_alan > 0 else np.nan
         )
 
-        sonuclar.append(
-            {
-                "kume_id": int(k_id),
-                "submesh": submesh,
-                "poligon": poligon,
-                "gercek_3d_alan": gercek_3d_alan,
-                "kalip_2d_alan": kalip_2d_alan,
-                "distorsiyon": distorsiyon,
-            }
-        )
+        sonuclar.append({
+            "kume_id": int(k_id),
+            "submesh": submesh,
+            "poligon": poligon,
+            "gercek_3d_alan": gercek_3d_alan,
+            "kalip_2d_alan": kalip_2d_alan,
+            "distorsiyon": distorsiyon,
+            "donusum_matrisi": don_mat,
+        })
     return sonuclar
-
 
 def toplam_distorsiyon_skoru(parca_sonuclari):
     """
@@ -280,9 +273,10 @@ def _kneedle_nokta_bul(sonuc_listesi):
     return int(ks[en_uzak_idx])
 
 
-def komsu_bilgisi_hesapla(mesh, kume_etiketleri):
+def dikis_merkezleri_bul(mesh, kume_etiketleri):
+    """Her dikiş hattının (iki parça arasındaki sınır) 3D uzaydaki fiziksel orta noktasını bulur."""
     face_adj = mesh.face_adjacency
-    komsuluklar = {}
+    seam_vertices = {}
     
     for i, j in face_adj:
         etiket_i = kume_etiketleri[i]
@@ -290,10 +284,16 @@ def komsu_bilgisi_hesapla(mesh, kume_etiketleri):
         
         if etiket_i != etiket_j:
             seam = tuple(sorted((etiket_i, etiket_j)))
-            if seam not in komsuluklar:
-                komsuluklar[seam] = []
+            if seam not in seam_vertices:
+                seam_vertices[seam] = set()
             
             ortak_vertex_id = np.intersect1d(mesh.faces[i], mesh.faces[j])
-            komsuluklar[seam].append(mesh.vertices[ortak_vertex_id])
+            seam_vertices[seam].update(ortak_vertex_id)
             
-    return komsuluklar
+    merkezler = {}
+    for seam, v_ids in seam_vertices.items():
+        if len(v_ids) > 0:
+            noktalar = mesh.vertices[list(v_ids)]
+            merkezler[seam] = np.mean(noktalar, axis=0) # Dikişin tam orta koordinatı
+            
+    return merkezler
