@@ -121,7 +121,7 @@ def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
 
         # --- YENİ: TERZİ İÇİN REFERANS NOKTALARI (ÇIT İŞARETLERİ) ---
         toplam_nokta = len(x)
-        adim = max(1, toplam_nokta // 12)
+        adim = max(1, toplam_nokta // 24)
         for idx in range(0, toplam_nokta - 1, adim):
             ax.text(x[idx], y[idx], str(idx), color="purple", fontsize=9, fontweight="bold",
                     ha="center", va="center", bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1.5))
@@ -286,6 +286,7 @@ with sekme2:
         etiketler, aktif = mesh_segmentlere_ayir(mesh, k, connectivity=connectivity)
         parcalar = parcalari_uret(mesh, etiketler, aktif)
         genel_skor = toplam_distorsiyon_skoru(parcalar)
+        dikis_merkezleri = dikis_merkezleri_bul(mesh, etiketler)
 
     col_3d, col_ozet = st.columns([2, 1])
     with col_3d:
@@ -301,7 +302,7 @@ with sekme2:
     st.divider()
     st.subheader("2D Terzi Kalıpları")
 
-    goruntuler = iki_boyutlu_kaliplari_ciz(parcalar, birim)
+    goruntuler = iki_boyutlu_kaliplari_ciz(parcalar, birim, dikis_merkezleri)
     kolonlar = st.columns(3)
     for i, (ad, veri) in enumerate(goruntuler.items()):
         with kolonlar[i % 3]:
