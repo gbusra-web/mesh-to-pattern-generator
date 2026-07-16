@@ -5,16 +5,7 @@ arayuz.py
 Streamlit tabanlı arayüz: STL -> terzi kalıbı iş akışı.
 
 Çalıştırma:
-    pip install trimesh shapely scikit-learn scipy matplotlib plotly streamlit
-    streamlit run arayuz.py
-
-Akış:
-  1) Sol menüden STL dosyasını yükleyin (ya da varsayılan yolu kullanın).
-  2) "1) Optimal Parça Sayısını Bul" sekmesinde k=2..10 için distorsiyon
-     grafiğini görüp önerilen k'yi alın.
-  3) "2) 3D Önizleme ve 2D Kalıplar" sekmesinde k'yi kaydırıcıyla değiştirip
-     hem renkli 3D modeli hem de alan etiketli 2D kalıpları anında görün.
-  4) Kalıpları ve alan tablosunu (CSV) indirin.
+    streamlit run app.py
 """
 
 import io
@@ -28,6 +19,7 @@ import pandas as pd
 
 from kalip import (
     mesh_yukle,
+    mesh_olceklendir,  # <--- HATA VEREN ENTEGRASYON BURAYA EKLENDİ
     komsuluk_matrisi_olustur,
     mesh_segmentlere_ayir,
     segment_renkleri_uret,
@@ -37,8 +29,6 @@ from kalip import (
 )
 
 st.set_page_config(page_title="Terzi Kalıbı Çıkarıcı", layout="wide")
-
-# --- BU İKİ SÖZLÜĞÜN DE KODUN ÜST KISMINDA OLMASI GEREKİYOR ---
 
 BIRIM_CARPANLARI = {
     "mm (varsayılan)": 1.0,
@@ -98,6 +88,8 @@ def uc_boyutlu_gorseli_ciz(mesh, kume_etiketleri, aktif_kumeler):
         height=550,
     )
     return fig
+
+
 def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
     """Her parça için ayrı ayrı matplotlib figürü üretir (PNG bytes olarak)."""
     import io
@@ -108,7 +100,7 @@ def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
     for i, p in enumerate(parcalar, start=1):
         poligon = p["poligon"]
         
-        # 1. Hata almamak için güvenli uzunluk çarpanı tanımlaması (Sözlükleri fonksiyonun içine aldık)
+        # 1. Hata almamak için güvenli uzunluk çarpanı tanımlaması
         uzunluk_carpanlari = {
             "mm (varsayılan)": 1.0,
             "cm": 0.1,
@@ -127,9 +119,8 @@ def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
         ax.fill(x, y, color="#f0f0f0", alpha=0.5)
 
         # --- YENİ: TERZİ İÇİN REFERANS NOKTALARI (ÇIT İŞARETLERİ) ---
-        # Poligonun etrafına mor renkle hizalama numaraları ekliyoruz.
         toplam_nokta = len(x)
-        adim = max(1, toplam_nokta // 12) # Çizginin etrafına eşit aralıklarla ~12 tane numara koy
+        adim = max(1, toplam_nokta // 12)
         for idx in range(0, toplam_nokta - 1, adim):
             ax.text(x[idx], y[idx], str(idx), color="purple", fontsize=9, fontweight="bold",
                     ha="center", va="center", bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1.5))
@@ -140,13 +131,11 @@ def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
         else: pay = 0.4
             
         try:
-            # Poligonu dikiş payı kadar dışa doğru büyüt
             dikis_payli_poligon = poligon.buffer(pay, join_style=2)
             xd, yd = dikis_payli_poligon.exterior.xy
             ax.plot(xd, yd, color="blue", linestyle="-.", linewidth=1.5, label=f"Kesim Çizgisi (+{pay} {birim_kisa} Pay)")
             minx, miny, maxx, maxy = dikis_payli_poligon.bounds
         except:
-            # Beklenmedik bir kavis hatası olursa programın çökmemesi için orijinal sınırlara dön
             minx, miny, maxx, maxy = poligon.bounds
         
         # 4. Kumaş Kesim Ölçüleri (Bounding Box - Kırmızı)
@@ -163,7 +152,7 @@ def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
         ax.text(minx - (maxx-minx)*0.03, miny + (maxy-miny)/2, f"Boy: {yukseklik:.1f} {birim_kisa}", 
                 color='red', ha='right', va='center', fontsize=11, fontweight='bold', rotation=90)
 
-        # 5. Başlık ve İsimlendirme (Dış fonksiyonlara bağlı kalmadan alan hesabı yapıldı)
+        # 5. Başlık ve İsimlendirme
         alan_carpani = 1.0 if "mm" in birim_adi else (0.01 if "cm" in birim_adi else 1.0/645.16)
         kalip_alan = p.get("kalip_2d_alan", 0) * alan_carpani
 
@@ -179,7 +168,6 @@ def iki_boyutlu_kaliplari_ciz(parcalar, birim_adi):
         ax.set_yticklabels([])
         ax.tick_params(axis='both', which='both', length=0)
         
-        # Terziye hangi rengin ne olduğunu açıklayan küçük bir lejant
         ax.legend(loc="upper right", fontsize=8)
 
         # Görüntüyü kaydet ve belleğe al
@@ -201,15 +189,17 @@ with st.sidebar:
     st.header("1. Model")
     yuklenen_dosya = st.file_uploader("STL / OBJ / PLY yükle", type=["stl", "obj", "ply"])
     birim = st.selectbox("Alan birimi", list(BIRIM_CARPANLARI.keys()))
-    st.caption("dosyanızı mm cinsindense 'mm' seçin; farklıysa çıktıyı buna göre okuyun.")
+    st.caption("dosyanız mm cinsindense 'mm' seçin; farklıysa çıktıyı buna göre okuyun.")
     
-    st.header("2. Ölçek Ayarı")
-    olcek_carpani = st.number_input(
-        "Modeli Büyüt/Küçült (Çarpan)", 
-        min_value=0.1, 
-        value=10.0, 
-        step=10.0,
-        help="Model çok küçükse bu değeri artırın (örn: 10, 100, 1000 yapın)."
+    # --- YENİ: Hata Veren Eski Çarpan Menüsü Tamamen Değiştirildi ---
+    st.header("2. Fiziksel Boyutlandırma")
+    hedef_cap_cm = st.slider(
+        "Taban Çapı (cm)", 
+        min_value=15.0, 
+        max_value=70.0, 
+        value=22.0, 
+        step=0.5,
+        help="Yetişkin bir insan kafası için ortalama 22 cm idealdir. Model orijinal halinde yüklenip bu çapa göre ölçeklendirilecektir."
     )
 
 
@@ -220,12 +210,11 @@ if yuklenen_dosya is None:
 # Orijinal modeli önbellekten yükle
 orijinal_mesh = _mesh_yukle_cache(yuklenen_dosya.getvalue(), yuklenen_dosya.name)
 
-# Modelin kopyasını alıp ölçekleyelim (önbellekteki asıl dosyayı bozmamak için)
+# --- YENİ: Modelin dinamik ölçeklendiği ve hatanın çözüldüğü ana kısım ---
 mesh = orijinal_mesh.copy()
-if olcek_carpani != 1.0:
-    mesh.apply_scale(olcek_carpani)
+mesh, uygulanan_olcek, orjinal_cap = mesh_olceklendir(mesh, hedef_cap_cm)
 
-st.success(f"Model yüklendi ve {olcek_carpani}x ölçeklendi: {len(mesh.faces)} yüzey, {len(mesh.vertices)} köşe.")
+st.success(f"Model yüklendi. Taban ~{orjinal_cap:.2f} birimden {hedef_cap_cm} cm'ye uyarlandı. ({uygulanan_olcek:.2f} kat ölçeklendi.)")
 
 sekme1, sekme2 = st.tabs(["1) Optimal Parça Sayısını Bul", "2) 3D Önizleme ve 2D Kalıplar"])
 
@@ -235,9 +224,7 @@ with sekme1:
     st.write(
         "Her parça sayısı (k) için model bölünüp düzleştirilir; düzleştirilmiş "
         "(2D) alan ile gerçek kavisli yüzey alanı karşılaştırılarak bir "
-        "**distorsiyon skoru** hesaplanır. Az parça → yüzey daha çok gerilir/büzülür "
-        "(yüksek distorsiyon). Çok parça → distorsiyon azalır ama dikiş/parça sayısı "
-        "artar. Aradaki 'diz noktası' genelde pratik bir denge sunar."
+        "**distorsiyon skoru** hesaplanır."
     )
     k_min, k_max = st.slider("Denenecek k aralığı", 2, 15, (2, 10))
 
@@ -344,5 +331,3 @@ with sekme2:
         file_name=f"terzi_kaliplari_k{k}.zip",
         mime="application/zip",
     )
-
-    
