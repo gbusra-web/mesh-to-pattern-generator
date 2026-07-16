@@ -1,10 +1,9 @@
-trimesh
-scipy
-scikit-learn
-shapely
-matplotlib
 streamlit
+trimesh
+shapely
+scikit-learn
+scipy
+matplotlib
 plotly
 pandas
 numpy
-networkx
