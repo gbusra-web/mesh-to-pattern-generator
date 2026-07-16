@@ -3,19 +3,6 @@
 kalip_araclari.py
 ------------------
 3D STL modelini terzi kalıbı (2D pattern) çıkarmak için çekirdek fonksiyonlar.
-
-Bu modül, orijinal 'terzi_kalip.py' scriptinin mantığını temel alır ama
-şunları ekler:
-  1. Segmentleri düzleştirirken GERÇEK 3D yüzey alanı ile 2D kalıp alanını
-     karşılaştırıp bir "distorsiyon" (gerilme/büzülme) skoru hesaplar.
-  2. Bu skoru kullanarak farklı parça sayıları (k) için toplam distorsiyonu
-     ölçer ve "dizin noktası" (knee point) yöntemiyle en makul k değerini
-     otomatik önerir.
-  3. Her adımı (segmentasyon, düzleştirme, alan hesabı) ayrı fonksiyonlara
-     böler ki bir arayüz (Streamlit) rahatça çağırabilsin.
-
-NOT: Bu dosya trimesh / scipy / sklearn / shapely kurulu bir ortamda
-çalıştırılmalıdır (aynı sizin terzi_kalip.py'yi çalıştırdığınız ortam).
 """
 
 import os
@@ -33,13 +20,48 @@ except ImportError as e:
 
 
 # ---------------------------------------------------------------------------
-# 1) MESH OKUMA VE KOMŞULUK MATRİSİ
+# 1) MESH OKUMA, DİNAMİK ÖLÇEKLENDİRME VE KOMŞULUK MATRİSİ
 # ---------------------------------------------------------------------------
 
 def mesh_yukle(dosya_yolu):
     """STL/OBJ/PLY dosyasını yükler ve tek bir Trimesh nesnesi döndürür."""
     mesh = trimesh.load(dosya_yolu, force="mesh")
     return mesh
+
+
+def mesh_olceklendir(mesh, hedef_cap_cm=22.0):
+    """
+    Modelin alt kısmındaki boşluğun (taban) genişliğini hesaplar ve 
+    istenen hedef çapa ulaşması için modeli dinamik olarak ölçeklendirir.
+    """
+    noktalar = mesh.vertices
+    
+    # Modelin bounding box (sınırlayıcı kutu) limitleri
+    min_koordinatlar = np.min(noktalar, axis=0)
+    max_koordinatlar = np.max(noktalar, axis=0)
+    
+    # Y ekseninde tabana en yakın %5'lik dilimi alt kesit olarak alıyoruz
+    y_esik_degeri = min_koordinatlar[1] + (max_koordinatlar[1] - min_koordinatlar[1]) * 0.05
+    taban_noktalari = noktalar[noktalar[:, 1] <= y_esik_degeri]
+    
+    if len(taban_noktalari) == 0:
+        # Taban bulunamazsa orijinal mesh'i değişmeden dön
+        return mesh, 1.0, 0.0
+        
+    # X ve Z eksenlerindeki açıklığı bul
+    taban_x_uzunlugu = np.max(taban_noktalari[:, 0]) - np.min(taban_noktalari[:, 0])
+    taban_z_uzunlugu = np.max(taban_noktalari[:, 2]) - np.min(taban_noktalari[:, 2])
+    
+    # Mevcut taban çapını en geniş eksen olarak belirliyoruz
+    mevcut_cap = max(taban_x_uzunlugu, taban_z_uzunlugu)
+    
+    # İhtiyacımız olan scale (ölçek) katsayisini hesapla
+    olcek_katsayisi = hedef_cap_cm / (mevcut_cap + 1e-9) # Sıfıra bölünme hatasını önlemek için küçük bir değer ekledik
+    
+    # Trimesh'in yerleşik metodu ile modelin tüm noktalarını tam oranda büyüt/küçült
+    mesh.apply_scale(olcek_katsayisi)
+    
+    return mesh, olcek_katsayisi, mevcut_cap
 
 
 def komsuluk_matrisi_olustur(mesh):
@@ -61,9 +83,6 @@ def mesh_segmentlere_ayir(mesh, parca_sayisi, connectivity=None, min_oran=0.02):
     """
     Mesh'i normallerine göre 'parca_sayisi' kadar bölgeye ayırır.
     Çöp/küçük kümeleri en yakın komşu büyük kümeye yedirir.
-
-    Döndürür: kume_etiketleri (n_faces,) uzunluğunda etiket dizisi,
-              aktif_kumeler (kalan benzersiz etiketler listesi)
     """
     if connectivity is None:
         connectivity = komsuluk_matrisi_olustur(mesh)
@@ -119,8 +138,6 @@ def segmenti_duzlestir(submesh, tolerans_orani=0.015, simplify_orani=0.3):
     """
     Bir alt-mesh'i (submesh) en iyi düzleme izdüşürüp pürüzsüz bir 2D
     poligon (shapely Polygon) olarak döndürür.
-
-    Döndürür: final_poligon (shapely Polygon) ya da None (başarısızsa)
     """
     sinir_hatlari = submesh.outline()
     if not sinir_hatlari or len(sinir_hatlari.entities) == 0:
@@ -167,13 +184,7 @@ def segmenti_duzlestir(submesh, tolerans_orani=0.015, simplify_orani=0.3):
 
 def parcalari_uret(mesh, kume_etiketleri, aktif_kumeler):
     """
-    Her aktif küme için:
-      - submesh
-      - 2D final poligon (kalıp)
-      - gercek_3d_alan (kavisli yüzey alanı, mm^2 ya da modelin birimi neyse)
-      - kalip_2d_alan  (düzleştirilmiş poligon alanı)
-      - distorsiyon    (|kalip - gercek| / gercek)
-    içeren bir liste (dict) döndürür. Düzleşemeyen parçalar atlanır.
+    Her aktif küme için 2D kalıp, alan ve distorsiyon hesabı yapar.
     """
     sonuclar = []
     for k_id in aktif_kumeler:
@@ -209,8 +220,7 @@ def parcalari_uret(mesh, kume_etiketleri, aktif_kumeler):
 
 def toplam_distorsiyon_skoru(parca_sonuclari):
     """
-    Parçaların yüzey alanına göre AĞIRLIKLANDIRILMIŞ ortalama distorsiyonunu
-    döndürür (0 = mükemmel düzleşme, 0.10 = %10 alan sapması, vb).
+    Parçaların yüzey alanına göre ağırlıklı ortalama distorsiyonunu hesaplar.
     """
     toplam_alan = sum(p["gercek_3d_alan"] for p in parca_sonuclari)
     if toplam_alan == 0:
@@ -229,12 +239,7 @@ def toplam_distorsiyon_skoru(parca_sonuclari):
 
 def optimal_parca_sayisi_bul(mesh, k_araligi=range(2, 11), min_oran=0.02, ilerleme_callback=None):
     """
-    k_araligi içindeki her k için segmentasyon + düzleştirme + distorsiyon
-    skoru hesaplar. Sonuç bir liste olarak döndürülür:
-        [{"k": k, "distorsiyon": skor, "parca_sayisi_gercek": len(aktif)}, ...]
-    ve ayrıca "kneedle" (diz noktası) yöntemiyle önerilen k değeri.
-
-    ilerleme_callback(k, i, toplam) -> arayüzde ilerleme çubuğu için opsiyonel.
+    Tavsiye edilen optimal k değerini hesaplar.
     """
     connectivity = komsuluk_matrisi_olustur(mesh)
     sonuc_listesi = []
@@ -255,11 +260,6 @@ def optimal_parca_sayisi_bul(mesh, k_araligi=range(2, 11), min_oran=0.02, ilerle
 
 
 def _kneedle_nokta_bul(sonuc_listesi):
-    """
-    Basit bir 'diz noktası' (knee point) tespiti:
-    Distorsiyon eğrisi genelde k arttıkça azalır (azalan getiri).
-    İlk ve son noktayı birleştiren doğruya en uzak nokta = diz noktası.
-    """
     gecerli = [s for s in sonuc_listesi if not np.isnan(s["distorsiyon"])]
     if len(gecerli) < 3:
         return gecerli[0]["k"] if gecerli else None
@@ -267,35 +267,32 @@ def _kneedle_nokta_bul(sonuc_listesi):
     ks = np.array([s["k"] for s in gecerli], dtype=float)
     ys = np.array([s["distorsiyon"] for s in gecerli], dtype=float)
 
-    # 0-1 aralığına normalize et
     ks_n = (ks - ks.min()) / (ks.max() - ks.min() + 1e-9)
     ys_n = (ys - ys.min()) / (ys.max() - ys.min() + 1e-9)
 
     x1, y1 = ks_n[0], ys_n[0]
     x2, y2 = ks_n[-1], ys_n[-1]
-    # noktanın (x1,y1)-(x2,y2) doğrusuna dik uzaklığı
     dx, dy = x2 - x1, y2 - y1
     norm = np.hypot(dx, dy) + 1e-9
     uzakliklar = np.abs(dy * (ks_n - x1) - dx * (ys_n - y1)) / norm
 
     en_uzak_idx = np.argmax(uzakliklar)
     return int(ks[en_uzak_idx])
+
+
 def komsu_bilgisi_hesapla(mesh, kume_etiketleri):
-    """Her yüzeyin komşularına bakarak hangi kümenin hangi kümeye değdiğini bulur."""
     face_adj = mesh.face_adjacency
-    komsuluklar = {} # (parca_i, parca_j) -> [kenar_noktalari]
+    komsuluklar = {}
     
     for i, j in face_adj:
         etiket_i = kume_etiketleri[i]
         etiket_j = kume_etiketleri[j]
         
         if etiket_i != etiket_j:
-            # Bu iki yüzey farklı segmentlere ait, yani burası bir dikiş hattı
             seam = tuple(sorted((etiket_i, etiket_j)))
             if seam not in komsuluklar:
                 komsuluklar[seam] = []
             
-            # Ortak kenar noktalarını bul
             ortak_vertex_id = np.intersect1d(mesh.faces[i], mesh.faces[j])
             komsuluklar[seam].append(mesh.vertices[ortak_vertex_id])
             
