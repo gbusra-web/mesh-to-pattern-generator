@@ -11,6 +11,7 @@ import scipy.sparse as sp
 from sklearn.cluster import AgglomerativeClustering
 from shapely.geometry import Polygon
 
+
 try:
     import trimesh
 except ImportError as e:
