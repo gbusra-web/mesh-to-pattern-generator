@@ -273,27 +273,31 @@ def _kneedle_nokta_bul(sonuc_listesi):
     return int(ks[en_uzak_idx])
 
 
-def dikis_merkezleri_bul(mesh, kume_etiketleri):
-    """Her dikiş hattının (iki parça arasındaki sınır) 3D uzaydaki fiziksel orta noktasını bulur."""
-    face_adj = mesh.face_adjacency
-    seam_vertices = {}
-    
-    for i, j in face_adj:
-        etiket_i = kume_etiketleri[i]
-        etiket_j = kume_etiketleri[j]
-        
-        if etiket_i != etiket_j:
-            seam = tuple(sorted((etiket_i, etiket_j)))
-            if seam not in seam_vertices:
-                seam_vertices[seam] = set()
+# --- SEVİYE 2: MATEMATİKSEL OLARAK DOĞRU DİKİŞ EŞLEŞTİRME ---
+    if dikis_merkezleri is not None and "donusum_matrisi" in p:
+            kume_id = p["kume_id"]
+            don_mat = p["donusum_matrisi"]
             
-            ortak_vertex_id = np.intersect1d(mesh.faces[i], mesh.faces[j])
-            seam_vertices[seam].update(ortak_vertex_id)
-            
-    merkezler = {}
-    for seam, v_ids in seam_vertices.items():
-        if len(v_ids) > 0:
-            noktalar = mesh.vertices[list(v_ids)]
-            merkezler[seam] = np.mean(noktalar, axis=0) # Dikişin tam orta koordinatı
-            
-    return merkezler
+            for seam, merkez_3d in dikis_merkezleri.items():
+                if kume_id in seam:
+                    hedef_kume = seam[0] if seam[1] == kume_id else seam[1]
+                    hedef_parca_no = kume_to_parca.get(hedef_kume, "?")
+                    
+                    # 1. 3D merkezi dönüşüm matrisi ile 2D düzlemine taşı
+                    pt_3d = np.array([merkez_3d[0], merkez_3d[1], merkez_3d[2], 1.0])
+                    pt_2d_hom = np.dot(don_mat, pt_3d)
+                    pt_2d = pt_2d_hom[:2]
+                    
+                    # 2. Noktayı dikiş hattına (dis_cevre) sabitle
+                    pnt = Point(pt_2d)
+                    projected_dist = dis_cevre.project(pnt)
+                    snap_pt = dis_cevre.interpolate(projected_dist)
+                    
+                    # 3. Harf atama (her dikiş hattı için benzersiz bir harf)
+                    seam_keys = list(dikis_merkezleri.keys())
+                    harf = chr(65 + (seam_keys.index(seam) % 26))
+                    
+                    # 4. Görselleştirme (zorder ile en üste al)
+                    ax.plot(snap_pt.x, snap_pt.y, marker='s', color='gold', markersize=12, markeredgecolor='black', zorder=5)
+                    ax.text(snap_pt.x, snap_pt.y, f"{harf}\n(P{hedef_parca_no})", 
+                            color="black", fontsize=8, fontweight="bold", ha="center", va="center", zorder=6)
